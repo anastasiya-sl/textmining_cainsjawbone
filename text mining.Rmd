@@ -1,0 +1,340 @@
+---
+title: "Text Mining Cains Jawbone"
+author: "Anastasiya"
+date: "16/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#import text into R
+```{r}
+library(tm)
+library(pdftools)
+
+library(readtext)
+
+rtext <- readtext::readtext("~/Documents/cains jawbone/cains jawbone/book/*")
+corp <- tm::Corpus(VectorSource(rtext[["text"]]))
+files <- list.files(pattern="pdf$")
+corp <- Corpus(URISource("~/Users/anastasiyaslyepchenko1/Documents/cains jawbone/cains jawbone/book/"))
+out <- lapply(files, pdf_text)
+
+cj.tdm <- TermDocumentMatrix(corp, control=list(removePunctuation=TRUE, stopwords=TRUE, tolower=TRUE, stemming=TRUE,removeNumbers=TRUE, bounds=list(global=c(3,Inf))))
+
+library(readr)
+library(Rcpp)
+
+
+
+library(tm)
+library(pdftools)
+
+library(readtext)
+
+
+out <- lapply(files, pdf_text)
+
+
+lapply(out, length)
+
+
+corp <- Corpus(URISource(files),
+               readerControl = list(reader = readPDF))
+
+cj.tdm <- TermDocumentMatrix(out[2], control=list(removePunctuation=TRUE, stopwords=TRUE, tolower=TRUE, stemming=TRUE,removeNumbers=TRUE, bounds=list(global=c(3,Inf))))
+
+
+cj.tdm <- TermDocumentMatrix(out[2], control=list(removePunctuation=TRUE, stopwords=TRUE, tolower=TRUE))
+
+inspect(cj.tdm) 
+
+
+
+```
+
+
+```{r}
+library(pdftools)
+library(tidyverse)
+library(tidytext)
+library(purrr)
+library(dplyr)
+library(stringr)
+
+files <- list.files(pattern="pdf$")
+
+text <- map_df(files[2], ~ data_frame(txt = pdf_text(.x)) %>%
+    mutate(filename = .x, pagenumber=row_number()) %>%
+    unnest_tokens(word, txt))
+
+View(text)
+
+View(text %>% group_by(word) %>% summarize(number_rows=n()) %>% arrange (desc(number_rows)))
+
+text <- text %>% filter(pagenumber %!in% c(101:104))
+text_nostopwords <- text %>% anti_join(stop_words)
+
+
+View(text_nostopwords %>% group_by(word) %>% summarize(number_rows=n()) %>% arrange (desc(number_rows)))
+```
+
+```{r}
+text %>% anti_join(stop_words) %>%
+  count(word, sort = TRUE) %>%
+  filter(n > 10)%>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word)) +
+  geom_col() +
+  labs(y = NULL)
+```
+
+```{r}
+bing_word_counts <- text[,3]  %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+bing_word_counts
+```
+
+```{r}
+bing_word_counts %>%
+  group_by(sentiment) %>%
+  slice_max(n, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free_y") +
+  labs(x = "Contribution to sentiment",
+       y = NULL)
+```
+
+```{r}
+text_sentences <- map_df(files[2], ~ data_frame(txt = pdf_text(.x)) %>%
+    mutate(filename = .x, pagenumber=row_number()) %>%
+    unnest_tokens(sentence, txt, token="sentences"))
+```
+
+
+```{r}
+bingnegative <- get_sentiments("bing") %>% 
+  filter(sentiment == "negative")
+
+wordcounts <- text %>%
+  group_by(pagenumber) %>%
+  summarize(words = n())
+
+out <- text %>%
+  semi_join(bingnegative) %>%
+  group_by(pagenumber) %>%
+  summarize(negativewords = n()) %>% 
+  left_join(wordcounts) %>%
+  mutate(ratio = negativewords/words) %>%
+  #slice_max(ratio, n = 1) %>% 
+  ungroup()
+
+```
+
+```{r}
+library(dplyr)
+obj <- map_df(files[2], ~ data_frame(txt = pdf_text(.x)) )
+obj <- obj[-c(101:104),]
+```
+
+#3- word ngrams
+```{r}
+o_ngrams <- obj %>% unnest_tokens(ngram,txt, token="ngrams", n=3) %>% group_by(ngram) %>% summarize(number_rows=n()) %>% arrange (desc(number_rows))
+
+o_separated <- o_ngrams %>% separate(ngram, into=c("word1","word2","word3"), sep=" ")
+`%!in%` <- Negate(`%in%`)
+o_separated <- cbind(o_separated, o_ngrams[,1])
+
+o_united <- o_separated %>% 
+              filter(word1 %!in% stop_words$word, 
+                     word2 %!in% stop_words$word,
+                     word3 %!in% stop_words$word) %>% unite(ngram, c(word1,word2,word3),sep=" ") 
+
+o_united_2 <- o_separated %>% 
+              filter(word1 %!in% stop_words$word) %>% unite(ngram, c(word1,word2,word3),sep=" ") 
+o_united_2
+```
+
+# bigrams
+```{r}
+o_bigrams <- obj %>% unnest_tokens(ngram,txt, token="ngrams", n=2) %>% group_by(ngram) %>% summarize(number_rows=n()) %>% arrange (desc(number_rows))
+
+o_bi_separated <- o_bigrams %>% separate(ngram, into=c("word1","word2"), sep=" ")
+`%!in%` <- Negate(`%in%`)
+
+o_bi_separated_ns <- o_bi_separated %>% 
+              filter(word1 %!in% stop_words$word, 
+                     word2 %!in% stop_words$word) 
+o_bi_united <- o_bi_separated %>% 
+              filter(word1 %!in% stop_words$word, 
+                     word2 %!in% stop_words$word) %>% unite(ngram, c(word1,word2),sep=" ") 
+
+```
+
+
+```{r}
+library(igraph)
+
+bigram_graph <- o_bi_separated_ns %>%
+  filter(number_rows > 1) %>%
+  graph_from_data_frame()
+
+bigram_graph
+
+library(ggraph)
+
+
+set.seed(2020)
+
+a <- grid::arrow(type = "closed", length = unit(0.01, "inches"))
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = number_rows), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.07, 'inches')) +
+  geom_node_point(color = "lightblue", size = 5) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1) +
+  theme_void()
+
+```
+Hard to tell anything useful from here.
+But what's felton's meat? what's lover's delight? Who is de Quincey and Sir Paul?
+What happened on Wimpole street, and why does the narrator refer to Henry as "poor henry"?
+
+
+```{r}
+library(tidygraph)
+library(ggraph)
+
+ngram_counts <- o_separated %>%   filter(!word1 %in% stop_words$word) %>% 
+  count(word1, word2,sort = TRUE) 
+
+ngram_graph <- ngram_counts %>% filter(n>1) %>% as_tbl_graph()
+ngram_graph
+
+ggraph(ngram_graph, layout="fr") + 
+  geom_edge_link() +
+  geom_node_point() + 
+  geom_node_text(aes(label = name), vjust = 1 , hjust = 1)
+```
+
+```{r}
+library(tidygraph)
+library(ggraph)
+
+o_ngrams <- obj %>% unnest_tokens(ngram,txt, token="ngrams", n=3) %>% group_by(ngram) %>% summarize(number_rows=n()) %>% arrange (desc(number_rows))
+
+o_separated <- o_ngrams %>% separate(ngram, into=c("word1","word2","word3"), sep=" ")
+
+o_separated <- cbind(o_ngram)
+`%!in%` <- Negate(`%in%`)
+
+ngram_counts <- o_separated %>%   filter(!word1 %in% stop_words$word) #%>% 
+ # count( word2, word3,sort = TRUE) 
+
+ngram_graph <- ngram_counts %>% filter(number_rows>1) %>% as_tbl_graph()
+ngram_graph
+
+max(ngram_counts$number_rows)
+
+arrow <- grid::arrow(type = "closed")
+
+ggraph(ngram_graph, layout="fr") + 
+  geom_edge_link(aes(alpha = number_rows), show.legend = FALSE,arrow=arrow,
+                 end_cap = circle(0.07, "inches")) + 
+  geom_node_point(color = "lightblue", size = 5) + 
+  geom_node_text(aes(label = name), size = 4, vjust = 1, hjust = 1)
+
+```
+
+
+```{r}
+
+library(widyr)
+
+text_nostopwords <- text_nostopwords %>% filter(word !="notes")
+word_pairs <- text_nostopwords%>% pairwise_count(word, pagenumber, sort=TRUE)
+
+word_pairs
+
+```
+
+Uh oh... we find "henry" and "dead" to co-occur
+
+```{r}
+word_cors <- text_nostopwords %>% group_by(word) %>% filter(n()>=2) %>% pairwise_cor(word, pagenumber, sort=TRUE)
+
+word_cors
+
+```
+
+These are words that have appeared only together on at least 2 pages
+```{r}
+word_cors <- text_nostopwords %>% group_by(word) %>% filter(n()>=2) %>% pairwise_cor(word, pagenumber, sort=TRUE)
+
+word_cors %>% filter(correlation == 1)
+
+```
+
+```{r}
+word_cors <- text_nostopwords %>% group_by(word) %>% filter(n()>=2) %>% pairwise_cor(word, pagenumber, sort=TRUE)
+
+word_cors %>% filter(item1=="murder")
+
+```
+```{r}
+word_cors %>% filter(item1=="killed")
+word_cors %>% filter(item1=="killing")
+
+```
+
+```{r}
+word_cors %>%
+  filter(item1 %in% c("murder", "killed","killing","dead","death", "death's", "victim")) %>%
+  group_by(item1) %>%
+  slice_max(correlation, n = 15) %>%
+  ungroup() %>%
+  mutate(item2 = reorder(item2, correlation)) %>%
+  ggplot(aes(item2, correlation)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ item1, scales = "free") +
+  coord_flip()
+```
+
+Here, things start to get a little more interesting.
+
+Top correlations with "dead" include "uncle", "man's", "couple", "woman".
+Death (and dead) have the word silver
+
+Death: francis, lover's
+Killed: Tom, thomas
+
+Killing: Perceval, aunt, wen, wife, ben
+
+Murder: wen, singer, ben, 
+Victim: lord, calabar, fakes(!)
+
+```{r}
+word_cors <- text_nostopwords %>% group_by(word) %>% filter(n()>=2) %>% pairwise_cor(word, pagenumber, sort=TRUE)
+
+```
+
+
+
+
+
+
+https://www.tidytextmining.com/tidytext.html
+https://data.library.virginia.edu/reading-pdf-files-into-r-for-text-mining/
+
+https://dk81.github.io/dkmathstats_site/rtext-freq-words.html
+
+
+https://www.tidytextmining.com/tidytext.html
